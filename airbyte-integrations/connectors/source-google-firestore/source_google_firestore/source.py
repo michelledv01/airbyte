@@ -37,6 +37,7 @@ class SourceGoogleFirestore(Source):
 
     def check(self, logger: AirbyteLogger, config: json) -> AirbyteConnectionStatus:
         self.initiate_connections(config)
+        logger.info("Connecting to firestore.")
         try:
             self.firestore.check()
             return AirbyteConnectionStatus(status=Status.SUCCEEDED)
@@ -45,10 +46,19 @@ class SourceGoogleFirestore(Source):
 
     def discover(self, logger: AirbyteLogger, config: json) -> AirbyteCatalog:
         streams = []
+        json_schema = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "additionalProperties": True,
+            "properties": {
+                "document_id": {"type": "string"},
+                "document_content": {"type": "object"},
+            },
+        }
         self.initiate_connections(config)
+        logger.info("Connecting to firestore.")
         for collection in self.firestore.collections():
             stream_name = f"{collection.id}"
-            json_schema = {"type": "object"}
             sync_modes = ["full_refresh"]
             streams.append(AirbyteStream(name=stream_name, json_schema=json_schema, supported_sync_modes=sync_modes))
         return AirbyteCatalog(streams=streams)
@@ -57,14 +67,16 @@ class SourceGoogleFirestore(Source):
             self, logger: AirbyteLogger, config: json, catalog: ConfiguredAirbyteCatalog, state: Dict[str, any]
     ) -> Generator[AirbyteMessage, None, None]:
         self.initiate_connections(config)
+        logger.info("Connecting to firestore.")
         for airbyte_stream in catalog.streams:
             stream_name = airbyte_stream.stream.name
-
+            logger.info(f"Fetching documents from {stream_name}")
             for doc in self.firestore.get(stream_name):
+                data = {"document_id": doc.id, "document_content": doc.to_dict(), **doc.to_dict()}
                 yield AirbyteMessage(
                     type=Type.RECORD,
                     record=AirbyteRecordMessage(
                         stream=stream_name,
-                        data=doc.to_dict(),
+                        data=data,
                         emitted_at=int(datetime.now().timestamp()) * 1000),
-        )
+                )

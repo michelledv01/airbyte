@@ -17,7 +17,3 @@ connectionSpecification:
       "title": "Credentials JSON"
       "airbyte_secret": true
       "order": 2
-    "collection":
-      "type": "string"
-      "description": "The name of the target firestore collection."
-      "title": "Collection Name"
