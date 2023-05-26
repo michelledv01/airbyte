@@ -1,6 +1,6 @@
 #
 # Copyright (c) 2023 Airbyte, Inc., all rights reserved.
-#cd airbyte-integrations/connectors/source
+#
 
 
 from setuptools import find_packages, setup
