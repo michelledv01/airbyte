@@ -29,11 +29,19 @@ class SourceGoogleFirestore(Source):
         self.source_project_id = None
         self.credentials = None
         self.firestore = None
+        self.append_sub_collections = None
 
     def initiate_connections(self, config: json):
         self.credentials = config["credentials_json"]
         self.source_project_id = config["project_id"]
         self.firestore = FirestoreSource(project_id=self.source_project_id, credentials_json=self.credentials)
+        self.append_sub_collections = self.enable_append_sub_collections(config)
+
+    def enable_append_sub_collections(self, config: json) -> bool:
+        append_sub_collections = config["append_sub_collections"]
+        if append_sub_collections == "No": return False
+        elif append_sub_collections == "Yes": return True
+        else: return ValueError(f"Invalid response for enable sub collection appending.")
 
     def check(self, logger: AirbyteLogger, config: json) -> AirbyteConnectionStatus:
         self.initiate_connections(config)
@@ -88,7 +96,10 @@ class SourceGoogleFirestore(Source):
             # Fetch nested sub-collections for each parent document
             for parent_doc in parent_documents:
                 sub_collections_documents = {}
-                sub_collections = firestore.get_sub_collections(collection_name, parent_doc.id)
+                sub_collections = None
+
+                if self.append_sub_collections:
+                    sub_collections = firestore.get_sub_collections(collection_name, parent_doc.id)
 
                 # Fetch documents from sub-collections
                 for sub_collection in sub_collections:
