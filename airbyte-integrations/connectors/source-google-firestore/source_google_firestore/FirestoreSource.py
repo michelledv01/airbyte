@@ -9,10 +9,6 @@ from google.cloud.firestore_v1 import DocumentSnapshot
 from google.oauth2 import service_account
 
 
-def to_document(snapshot: DocumentSnapshot) -> Optional[dict[str, Any]]:
-    return snapshot.to_dict()
-
-
 class FirestoreSource:
     def __init__(self, project_id: str, credentials_json: Optional[str] = None):
         connection = {"project": project_id}
@@ -31,11 +27,11 @@ class FirestoreSource:
     def check(self) -> bool:
         return bool(self.collections())
 
-    def read(self, collection_name: str):
-        map(to_document, self.get())
-
     def collections(self) -> list:
         return list(self.client.collections())
 
-    def get(self, name: str) -> Generator[DocumentSnapshot, Any, None]:
+    def get_documents(self, name: str) -> Generator[DocumentSnapshot, Any, None]:
         return self.client.collection(name).stream()
+
+    def get_sub_collections(self, collection_name: str, document_id: str):
+        return self.client.collection(collection_name).document(document_id).collections()

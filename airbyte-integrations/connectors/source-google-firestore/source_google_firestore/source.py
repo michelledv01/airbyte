@@ -55,28 +55,57 @@ class SourceGoogleFirestore(Source):
                 "document_content": {"type": "object"},
             },
         }
+
         self.initiate_connections(config)
         logger.info("Connecting to firestore.")
-        for collection in self.firestore.collections():
+
+        # Fetch collections from the configured project
+        collections = self.firestore.collections()
+
+        for collection in collections:
             stream_name = f"{collection.id}"
             sync_modes = ["full_refresh"]
             streams.append(AirbyteStream(name=stream_name, json_schema=json_schema, supported_sync_modes=sync_modes))
+
         return AirbyteCatalog(streams=streams)
+
+
 
     def read(
             self, logger: AirbyteLogger, config: json, catalog: ConfiguredAirbyteCatalog, state: Dict[str, any]
     ) -> Generator[AirbyteMessage, None, None]:
         self.initiate_connections(config)
         logger.info("Connecting to firestore.")
+        firestore = self.firestore
+
         for airbyte_stream in catalog.streams:
-            stream_name = airbyte_stream.stream.name
-            logger.info(f"Fetching documents from {stream_name}")
-            for doc in self.firestore.get(stream_name):
-                data = {"document_id": doc.id, "document_content": doc.to_dict(), **doc.to_dict()}
+            collection_name = airbyte_stream.stream.name
+            logger.info(f"Fetching documents from {collection_name}")
+
+            # Fetch parent documents
+            parent_documents = firestore.get_documents(collection_name)
+
+            # Fetch nested sub-collections for each parent document
+            for parent_doc in parent_documents:
+                sub_collections_documents = {}
+                sub_collections = firestore.get_sub_collections(collection_name, parent_doc.id)
+
+                # Fetch documents from sub-collections
+                for sub_collection in sub_collections:
+                    sub_collection_name = sub_collection.id
+                    sub_collections_documents[sub_collection_name] = []
+
+                    # Append sub-collection documents to list
+                    for child_doc in sub_collection.stream():
+                        sub_collections_documents[sub_collection_name].append(child_doc.to_dict())
+
+                # Combine parent document and sub-collection documents
+                data = {"document_id": parent_doc.id, "document_content": parent_doc.to_dict() | sub_collections_documents }
+
                 yield AirbyteMessage(
                     type=Type.RECORD,
                     record=AirbyteRecordMessage(
-                        stream=stream_name,
+                        stream=collection_name,
                         data=data,
                         emitted_at=int(datetime.now().timestamp()) * 1000),
                 )
