@@ -3,9 +3,8 @@
 #
 
 import json
-from typing import Any, Optional, Generator
+from typing import Optional
 from google.cloud import firestore
-from google.cloud.firestore_v1 import DocumentSnapshot
 from google.oauth2 import service_account
 
 
@@ -30,8 +29,8 @@ class FirestoreSource:
     def collections(self) -> list:
         return list(self.client.collections())
 
-    def get_documents(self, name: str) -> Generator[DocumentSnapshot, Any, None]:
-        return self.client.collection(name).stream()
+    def get_documents(self, name: str):
+        return self.client.collection(name)
 
     def get_sub_collections(self, collection_name: str, document_id: str):
         return self.client.collection(collection_name).document(document_id).collections()
