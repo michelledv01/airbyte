@@ -19,6 +19,7 @@ from airbyte_cdk.models import (
     Type,
 )
 from airbyte_cdk.sources import Source
+from google.cloud.firestore_v1.field_path import FieldPath
 
 from source_google_firestore.FirestoreSource import FirestoreSource
 
@@ -30,10 +31,12 @@ class SourceGoogleFirestore(Source):
         self.credentials: Union[None, str] = None
         self.firestore: Union[None, FirestoreSource] = None
         self.append_sub_collections: Union[None, bool] = None
+        self.document_id_field_name: Union[None, str] = None
 
     def initiate_connections(self, config: json):
         self.credentials = config["credentials_json"]
         self.source_project_id = config["project_id"]
+        self.document_id_field_name = config["document_id_field_name"] if "document_id_field_name" in config else "id"
         self.firestore = FirestoreSource(project_id=self.source_project_id, credentials_json=self.credentials)
         self.append_sub_collections = self.enable_append_sub_collections(config)
 
@@ -49,9 +52,10 @@ class SourceGoogleFirestore(Source):
 
     def get_documents_query(self, collection_name: str, document: dict):
         firestore = self.firestore
-        base_query = firestore.get_documents(collection_name).limit(1000).order_by("id")
-        if document:
-            return base_query.start_at({"id": document["id"]}).stream()
+        base_query = firestore.get_documents(collection_name).limit(1000).order_by(self.document_id_field_name)
+        start_after = {f"{self.document_id_field_name}": document[self.document_id_field_name]} if document else None
+        if document is not None:
+            return base_query.start_after(start_after).stream()
         else:
             return base_query.stream()
 
@@ -73,11 +77,11 @@ class SourceGoogleFirestore(Source):
     def get_airbyte_data(self, logger: AirbyteLogger, parent_documents: list, collection_name: str):
         airbyte_data = []
         for parent_doc in parent_documents:
-            logger.info(f"Fetching sub-collections for {parent_doc['id']}")
+            logger.info(f"Fetching sub-collections for {parent_doc[self.document_id_field_name]}")
             # Fetch nested sub-collections for each parent document
-            sub_collections_documents = self.get_sub_collection_documents(collection_name, parent_doc['id'])
+            sub_collections_documents = self.get_sub_collection_documents(collection_name, parent_doc[self.document_id_field_name])
             # Combine parent document and sub-collection documents
-            data = {"document_id": parent_doc['id'], "document_content": parent_doc | sub_collections_documents}
+            data = {"document_id": parent_doc[self.document_id_field_name], "document_content": parent_doc | sub_collections_documents}
             airbyte_data.append(data)
         return airbyte_data
 
@@ -85,13 +89,15 @@ class SourceGoogleFirestore(Source):
         if data is None:
             data = []
         parent_documents = [doc.to_dict() for doc in self.get_documents_query(collection_name, start_at)]
+        for doc in self.get_documents_query(collection_name, start_at):
+            print(doc)
         # Fetch sub-collections for each parent document
         data.extend(self.get_airbyte_data(logger, list(parent_documents), collection_name))
-        next_start_at = parent_documents[-1]
+        next_start_at = parent_documents[-1] if parent_documents else None
 
         if next_start_at is not None:
             logger.info(f"Fetching next batch of documents from {collection_name}")
-            self.fetch_records(logger, collection_name, next_start_at, data)
+            return self.fetch_records(logger, collection_name, next_start_at, data)
         else:
             return data
 
@@ -151,6 +157,7 @@ class SourceGoogleFirestore(Source):
             collection_name = airbyte_stream.stream.name
             logger.info(f"Fetching documents from {collection_name}")
             formatted_documents: list[dict] = self.fetch_records(logger, collection_name, None)
+            print(formatted_documents)
             logger.info(f"Finished fetching documents from {collection_name}")
             logger.info(f"Streaming documents from {collection_name} to Airbyte.")
             return self.send_airbyte_message(collection_name, formatted_documents)
