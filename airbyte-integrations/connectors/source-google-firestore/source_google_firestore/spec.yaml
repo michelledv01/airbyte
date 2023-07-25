@@ -22,8 +22,12 @@ connectionSpecification:
       "title": "Append Sub Collections?"
       "description": "Enable appending nested sub collection documents to their parent document."
       "enum": ["Yes", "No"]
-    "document_id_field_name":
+    "primary_key":
       "type": "string"
-      "title": "Document ID Field Name"
+      "title": "Document Primary Key"
       "description": "The name of the field that contains the document ID. If left empty, \"id\" will be used as the field name."
+    "cursor_field":
+      "type": "string"
+      "title": "Cursor Field"
+      "description": "The name of the field that contains the cursor value; must be at the root level of the parent document. If left empty, \"updated_at\" will be used as the field name."
 
