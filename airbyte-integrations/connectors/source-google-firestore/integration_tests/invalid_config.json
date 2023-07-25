@@ -1,3 +1,5 @@
 {
-  "todo-wrong-field": "this should be an incomplete config file, used in standard tests"
+  "project_id": "",
+  "credentials_json": "",
+  "append_sub_collections": "Yes"
 }

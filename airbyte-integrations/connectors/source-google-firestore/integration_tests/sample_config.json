@@ -1,3 +1,5 @@
 {
-  "fix-me": "TODO"
+  "project_id": "ADD PROJECT ID HERE",
+  "credentials_json": "ADD YOUR CREDENTIALS HERE",
+  "append_sub_collections": "Yes"
 }
