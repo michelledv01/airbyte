@@ -5,8 +5,7 @@ from airbyte_protocol.models import ConfiguredAirbyteStream, AirbyteMessage, Air
 
 
 class AirbyteHelpers:
-    def __init__(self, logger: AirbyteLogger, airbyte_stream: ConfiguredAirbyteStream):
-        self.logger = logger
+    def __init__(self, airbyte_stream: ConfiguredAirbyteStream):
         self.airbyte_stream = airbyte_stream
         self.primary_key = airbyte_stream.source_defined_primary_key.pop().pop()
         self.stream_name = airbyte_stream.stream.name
@@ -18,11 +17,8 @@ class AirbyteHelpers:
         return data
 
     def send_airbyte_message(self, data: list[dict]):
-        logger = self.logger
         stream_name = self.stream_name
         formatted_data = self.format_data(data)
-        logger.info(f"Streaming documents from {stream_name} to Airbyte.")
-
         for record in formatted_data:
             yield AirbyteMessage(
                 type=Type.RECORD,

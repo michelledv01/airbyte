@@ -16,5 +16,5 @@ class FirestoreFullRefresh:
 
     def stream(self):
         documents: list[dict] = self.query_helpers.fetch_records()
-        airbyte = AirbyteHelpers(self.logger, self.airbyte_stream)
+        airbyte = AirbyteHelpers(self.airbyte_stream)
         return airbyte.send_airbyte_message(documents)

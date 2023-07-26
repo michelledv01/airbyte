@@ -3,6 +3,9 @@ from typing import Union
 
 from airbyte_cdk import AirbyteLogger
 from airbyte_protocol.models import ConfiguredAirbyteStream
+from google.cloud.firestore_v1 import FieldFilter
+from google.api_core.datetime_helpers import DatetimeWithNanoseconds
+
 
 from source_google_firestore.FirestoreSource import FirestoreSource
 
@@ -30,7 +33,9 @@ class QueryHelpers:
         base_query = firestore.get_documents(collection_name).limit(1000)
 
         if cursor_value:
-            base_query = base_query.order_by(cursor_field).where(cursor_field, ">", cursor_value)
+            start_after = FieldFilter(cursor_field, ">=", DatetimeWithNanoseconds.fromtimestamp(cursor_value["start_at"]))
+            end_before = FieldFilter(cursor_field, "<", DatetimeWithNanoseconds.fromtimestamp(cursor_value["end_at"]))
+            base_query = base_query.order_by(cursor_field).where(filter=start_after).where(filter=end_before)
         else:
             base_query = base_query.order_by(self.primary_key)
 
@@ -65,7 +70,6 @@ class QueryHelpers:
 
     def fetch_records(self, start_at=None, data=None, cursor_value=None) -> list[dict]:
         collection_name = self.airbyte_stream.stream.name
-        logger = self.logger
 
         if data is None:
             data = []
@@ -76,9 +80,6 @@ class QueryHelpers:
         next_start_at = parent_documents[-1] if parent_documents else None
 
         if next_start_at is not None:
-            logger.info(f"Fetching next batch of documents from {collection_name}")
             return self.fetch_records(next_start_at, data)
         else:
-            logger.info(f"Finished fetching documents from {collection_name}")
             return data
-

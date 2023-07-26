@@ -36,23 +36,24 @@ class FirestoreIncrementalRefresh(IncrementalMixin, ABC):
         last_updated_at = datetime.strptime(last_updated_at, "%Y-%m-%dT%H:%M:%S.%f")
         sync_time = datetime.utcnow()
         while last_updated_at < sync_time:
-            timeframes.append({self.cursor_field: last_updated_at})
+            end_at = last_updated_at + timedelta(minutes=1)
+            timeframes.append({ "start_at": last_updated_at.timestamp(), "end_at": end_at.timestamp(), self.cursor_field: last_updated_at})
             last_updated_at += timedelta(minutes=1)
         return timeframes
 
     def stream(self, state):
         last_updated_at = state[self.cursor_field] if state[self.cursor_field] else None
         timeframes = self.chuck_time(last_updated_at) if last_updated_at else None
-        airbyte = AirbyteHelpers(self.logger, self.airbyte_stream)
-
+        airbyte = AirbyteHelpers(self.airbyte_stream)
         if timeframes is None or not timeframes:
             documents = self.query_helpers.fetch_records()
-            airbyte.send_airbyte_message(documents)
+            for airbyte_message in airbyte.send_airbyte_message(documents):
+                yield airbyte_message
             self._cursor_value = datetime.utcnow()
         else:
             for timeframe in timeframes:
-                documents: list[dict] = self.query_helpers.fetch_records(cursor_value=timeframe[self.cursor_field])
-                print(documents)
-                airbyte.send_airbyte_message(documents)
+                documents: list[dict] = self.query_helpers.fetch_records(cursor_value=timeframe)
+                for airbyte_message in airbyte.send_airbyte_message(documents):
+                    yield airbyte_message
                 self._cursor_value = timeframe[self.cursor_field]
         yield AirbyteMessage(type=Type.STATE, state=self.state)
