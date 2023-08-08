@@ -81,7 +81,7 @@ class QueryHelpers:
         next_start_at = documents[-1] if documents else None
 
         if next_start_at is not None:
-            logger.info(f"Fetching next batch of documents. Last document: {next_start_at['id']}")
+            logger.info(f"Fetching next batch of documents. Last document: {next_start_at[self.primary_key]}")
             return self.fetch_records(next_start_at, cursor_value)
         else:
             return data
