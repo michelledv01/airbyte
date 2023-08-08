@@ -49,10 +49,11 @@ class SourceGoogleFirestore(Source):
             "properties": {
                 "document_id": {"type": "string"},
                 "document_content": {"type": "object"},
+                "updated_at": {"type": "string", "optional": True}
             },
         }
-        cursor_field = config.cursor_field if "cursor_field" in config else "updated_at"
-        primary_key = config.primary_key if "primary_key" in config else "id"
+        cursor_field = config.get("cursor_field", "updated_at")
+        primary_key = config.get("primary_key", "id")
 
         self.initiate_connections(config)
         logger.info("Connecting to firestore.")
@@ -66,15 +67,10 @@ class SourceGoogleFirestore(Source):
                     json_schema=json_schema,
                     supported_sync_modes=["full_refresh", "incremental"],
                     source_defined_cursor=True,
-                    cursor_field=[cursor_field],
                     default_cursor_field=[cursor_field],
-                    primary_key=[[primary_key]],
                     default_primary_key=[[primary_key]]
                 )
             )
-
-        for stream in streams:
-            logger.info(stream)
 
         return AirbyteCatalog(streams=streams)
 
