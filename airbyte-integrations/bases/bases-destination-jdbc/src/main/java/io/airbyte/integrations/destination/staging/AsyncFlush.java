@@ -4,14 +4,16 @@
 
 package io.airbyte.integrations.destination.staging;
 
+import io.airbyte.commons.json.Jsons;
 import io.airbyte.db.jdbc.JdbcDatabase;
+import io.airbyte.integrations.base.destination.typing_deduping.TypeAndDedupeOperationValve;
+import io.airbyte.integrations.base.destination.typing_deduping.TyperDeduper;
 import io.airbyte.integrations.destination.jdbc.WriteConfig;
 import io.airbyte.integrations.destination.record_buffer.FileBuffer;
 import io.airbyte.integrations.destination.s3.csv.CsvSerializedBuffer;
 import io.airbyte.integrations.destination.s3.csv.StagingDatabaseCsvSheetGenerator;
 import io.airbyte.integrations.destination_async.DestinationFlushFunction;
-import io.airbyte.protocol.models.Jsons;
-import io.airbyte.protocol.models.v0.AirbyteMessage;
+import io.airbyte.integrations.destination_async.partial_messages.PartialAirbyteMessage;
 import io.airbyte.protocol.models.v0.ConfiguredAirbyteCatalog;
 import io.airbyte.protocol.models.v0.StreamDescriptor;
 import java.util.List;
@@ -30,38 +32,39 @@ class AsyncFlush implements DestinationFlushFunction {
   private final StagingOperations stagingOperations;
   private final JdbcDatabase database;
   private final ConfiguredAirbyteCatalog catalog;
+  private final TypeAndDedupeOperationValve typerDeduperValve;
+  private final TyperDeduper typerDeduper;
 
   public AsyncFlush(final Map<StreamDescriptor, WriteConfig> streamDescToWriteConfig,
                     final StagingOperations stagingOperations,
                     final JdbcDatabase database,
-                    final ConfiguredAirbyteCatalog catalog) {
+                    final ConfiguredAirbyteCatalog catalog,
+                    final TypeAndDedupeOperationValve typerDeduperValve,
+                    final TyperDeduper typerDeduper) {
     this.streamDescToWriteConfig = streamDescToWriteConfig;
     this.stagingOperations = stagingOperations;
     this.database = database;
     this.catalog = catalog;
+    this.typerDeduperValve = typerDeduperValve;
+    this.typerDeduper = typerDeduper;
   }
 
-  // todo(davin): exceptions are too broad.
   @Override
-  public void flush(final StreamDescriptor decs, final Stream<AirbyteMessage> stream) throws Exception {
-    // write this to a file - serilizable buffer?
-    // where do we create all the write configs?
-    log.info("Starting staging flush..");
-    CsvSerializedBuffer writer = null;
+  public void flush(final StreamDescriptor decs, final Stream<PartialAirbyteMessage> stream) throws Exception {
+    final CsvSerializedBuffer writer;
     try {
       writer = new CsvSerializedBuffer(
           new FileBuffer(CsvSerializedBuffer.CSV_GZ_SUFFIX),
           new StagingDatabaseCsvSheetGenerator(),
           true);
 
-      log.info("Converting to CSV file..");
-
       // reassign as lambdas require references to be final.
-      final CsvSerializedBuffer finalWriter = writer;
       stream.forEach(record -> {
         try {
-          // todo(davin): handle non-record airbyte messages.
-          finalWriter.accept(record.getRecord());
+          // todo (cgardens) - most writers just go ahead and re-serialize the contents of the record message.
+          // we should either just pass the raw string or at least have a way to do that and create a default
+          // impl that maintains backwards compatible behavior.
+          writer.accept(record.getSerialized(), record.getRecord().getEmittedAt());
         } catch (final Exception e) {
           throw new RuntimeException(e);
         }
@@ -70,9 +73,8 @@ class AsyncFlush implements DestinationFlushFunction {
       throw new RuntimeException(e);
     }
 
-    log.info("Converted to CSV file..");
     writer.flush();
-    log.info("Flushing buffer for stream {} ({}) to staging", decs.getName(), FileUtils.byteCountToDisplaySize(writer.getByteCount()));
+    log.info("Flushing CSV buffer for stream {} ({}) to staging", decs.getName(), FileUtils.byteCountToDisplaySize(writer.getByteCount()));
     if (!streamDescToWriteConfig.containsKey(decs)) {
       throw new IllegalArgumentException(
           String.format("Message contained record from a stream that was not in the catalog. \ncatalog: %s", Jsons.serialize(catalog)));
@@ -85,11 +87,19 @@ class AsyncFlush implements DestinationFlushFunction {
         stagingOperations.getStagingPath(StagingConsumerFactory.RANDOM_CONNECTION_ID, schemaName, writeConfig.getStreamName(),
             writeConfig.getWriteDatetime());
     try {
-      log.info("Starting upload to stage..");
       final String stagedFile = stagingOperations.uploadRecordsToStage(database, writer, schemaName, stageName, stagingPath);
-      GeneralStagingFunctions.copyIntoTableFromStage(database, stageName, stagingPath, List.of(stagedFile), writeConfig.getOutputTableName(),
+      GeneralStagingFunctions.copyIntoTableFromStage(
+          database,
+          stageName,
+          stagingPath,
+          List.of(stagedFile),
+          writeConfig.getOutputTableName(),
           schemaName,
-          stagingOperations);
+          stagingOperations,
+          writeConfig.getNamespace(),
+          writeConfig.getStreamName(),
+          typerDeduperValve,
+          typerDeduper);
     } catch (final Exception e) {
       log.error("Failed to flush and commit buffer data into destination's raw table", e);
       throw new RuntimeException("Failed to upload buffer to stage and commit to destination", e);
@@ -100,8 +110,12 @@ class AsyncFlush implements DestinationFlushFunction {
 
   @Override
   public long getOptimalBatchSizeBytes() {
-    // todo(davin): this should be per-destination specific. currently this is for Snowflake.
-    return 200 * 1024 * 1024;
+    // todo(ryankfu): this should be per-destination specific. currently this is for Snowflake.
+    // The size chosen is currently for improving the performance of low memory connectors. With 1 Gi of
+    // resource the connector will usually at most fill up around 150 MB in a single queue. By lowering
+    // the batch size, the AsyncFlusher will flush in smaller batches which allows for memory to be
+    // freed earlier similar to a sliding window effect
+    return 50 * 1024 * 1024;
   }
 
 }
