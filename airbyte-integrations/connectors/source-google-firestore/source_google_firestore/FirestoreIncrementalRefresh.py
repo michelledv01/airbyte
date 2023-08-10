@@ -5,7 +5,7 @@ from typing import Mapping, Any
 
 from airbyte_cdk import AirbyteLogger
 from airbyte_cdk.sources.streams import IncrementalMixin
-from airbyte_protocol.models import ConfiguredAirbyteStream, Type, AirbyteMessage
+from airbyte_protocol.models import ConfiguredAirbyteStream, Type, AirbyteMessage, AirbyteStateMessage
 
 from source_google_firestore.AirbyteHelpers import AirbyteHelpers
 from source_google_firestore.FirestoreSource import FirestoreSource
@@ -17,6 +17,7 @@ class FirestoreIncrementalRefresh(IncrementalMixin, ABC):
         self.query = QueryHelpers(firestore, logger, config, airbyte_stream)
         self.logger = logger
         self.airbyte = AirbyteHelpers(airbyte_stream, config)
+        self.collection_name = airbyte_stream.stream.name
         self.cursor_field = config.get("cursor_field", "updated_at")
         self._cursor_value = None
 
@@ -41,6 +42,16 @@ class FirestoreIncrementalRefresh(IncrementalMixin, ABC):
             last_updated_at += timedelta(minutes=1)
         return timeframes
 
+    def get_cursor_value(self, documents: list[dict]):
+        max_value = None
+
+        for doc in documents:
+            field_value = doc.get(self.cursor_field, None)
+            if field_value is not None or field_value != "":
+                if max_value is None or field_value > max_value:
+                    max_value = field_value
+        return max_value
+
     def stream(self, state):
         airbyte = self.airbyte
         query = self.query
@@ -53,12 +64,12 @@ class FirestoreIncrementalRefresh(IncrementalMixin, ABC):
             for airbyte_message in airbyte.send_airbyte_message(documents):
                 yield airbyte_message
             self._cursor_value = datetime.utcnow()
+            yield AirbyteMessage(type=Type.STATE, state=AirbyteStateMessage(data=self.state))
         else:
             for timeframe in timeframes:
                 self.logger.info(f"Fetching documents from {timeframe['start_at']} to {timeframe['end_at']}")
                 documents: list[dict] = query.fetch_records(cursor_value=timeframe)
-                self.logger.info(f"Finished fetching documents. Total documents: {len(documents)}")
                 for airbyte_message in airbyte.send_airbyte_message(documents):
                     yield airbyte_message
                 self._cursor_value = timeframe[self.cursor_field]
-        yield AirbyteMessage(type=Type.STATE, state=self.state)
+                yield AirbyteMessage(type=Type.STATE, state=AirbyteStateMessage(data=self.state))
